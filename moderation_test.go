@@ -1,9 +1,6 @@
 package openai_test
 
 import (
-	. "github.com/sashabaranov/go-openai"
-	"github.com/sashabaranov/go-openai/internal/test/checks"
-
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,6 +10,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sashabaranov/go-openai"
+	"github.com/sashabaranov/go-openai/internal/test/checks"
 )
 
 // TestModeration Tests the moderations endpoint of the API using the mocked server.
@@ -20,11 +20,46 @@ func TestModerations(t *testing.T) {
 	client, server, teardown := setupOpenAITestServer()
 	defer teardown()
 	server.RegisterHandler("/v1/moderations", handleModerationEndpoint)
-	_, err := client.Moderations(context.Background(), ModerationRequest{
-		Model: ModerationTextStable,
+	_, err := client.Moderations(context.Background(), openai.ModerationRequest{
+		Model: openai.ModerationTextStable,
 		Input: "I want to kill them.",
 	})
 	checks.NoError(t, err, "Moderation error")
+}
+
+// TestModerationsWithIncorrectModel Tests passing valid and invalid models to moderations endpoint.
+func TestModerationsWithDifferentModelOptions(t *testing.T) {
+	var modelOptions []struct {
+		model  string
+		expect error
+	}
+	modelOptions = append(modelOptions,
+		getModerationModelTestOption(openai.GPT3Dot5Turbo, openai.ErrModerationInvalidModel),
+		getModerationModelTestOption(openai.ModerationTextStable, nil),
+		getModerationModelTestOption(openai.ModerationTextLatest, nil),
+		getModerationModelTestOption("", nil),
+	)
+	client, server, teardown := setupOpenAITestServer()
+	defer teardown()
+	server.RegisterHandler("/v1/moderations", handleModerationEndpoint)
+	for _, modelTest := range modelOptions {
+		_, err := client.Moderations(context.Background(), openai.ModerationRequest{
+			Model: modelTest.model,
+			Input: "I want to kill them.",
+		})
+		checks.ErrorIs(t, err, modelTest.expect,
+			fmt.Sprintf("Moderations(..) expects err: %v, actual err:%v", modelTest.expect, err))
+	}
+}
+
+func getModerationModelTestOption(model string, expect error) struct {
+	model  string
+	expect error
+} {
+	return struct {
+		model  string
+		expect error
+	}{model: model, expect: expect}
 }
 
 // handleModerationEndpoint Handles the moderation endpoint by the test server.
@@ -36,32 +71,32 @@ func handleModerationEndpoint(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
-	var moderationReq ModerationRequest
+	var moderationReq openai.ModerationRequest
 	if moderationReq, err = getModerationBody(r); err != nil {
 		http.Error(w, "could not read request", http.StatusInternalServerError)
 		return
 	}
 
-	resCat := ResultCategories{}
-	resCatScore := ResultCategoryScores{}
+	resCat := openai.ResultCategories{}
+	resCatScore := openai.ResultCategoryScores{}
 	switch {
 	case strings.Contains(moderationReq.Input, "kill"):
-		resCat = ResultCategories{Violence: true}
-		resCatScore = ResultCategoryScores{Violence: 1}
+		resCat = openai.ResultCategories{Violence: true}
+		resCatScore = openai.ResultCategoryScores{Violence: 1}
 	case strings.Contains(moderationReq.Input, "hate"):
-		resCat = ResultCategories{Hate: true}
-		resCatScore = ResultCategoryScores{Hate: 1}
+		resCat = openai.ResultCategories{Hate: true}
+		resCatScore = openai.ResultCategoryScores{Hate: 1}
 	case strings.Contains(moderationReq.Input, "suicide"):
-		resCat = ResultCategories{SelfHarm: true}
-		resCatScore = ResultCategoryScores{SelfHarm: 1}
+		resCat = openai.ResultCategories{SelfHarm: true}
+		resCatScore = openai.ResultCategoryScores{SelfHarm: 1}
 	case strings.Contains(moderationReq.Input, "porn"):
-		resCat = ResultCategories{Sexual: true}
-		resCatScore = ResultCategoryScores{Sexual: 1}
+		resCat = openai.ResultCategories{Sexual: true}
+		resCatScore = openai.ResultCategoryScores{Sexual: 1}
 	}
 
-	result := Result{Categories: resCat, CategoryScores: resCatScore, Flagged: true}
+	result := openai.Result{Categories: resCat, CategoryScores: resCatScore, Flagged: true}
 
-	res := ModerationResponse{
+	res := openai.ModerationResponse{
 		ID:    strconv.Itoa(int(time.Now().Unix())),
 		Model: moderationReq.Model,
 	}
@@ -72,16 +107,16 @@ func handleModerationEndpoint(w http.ResponseWriter, r *http.Request) {
 }
 
 // getModerationBody Returns the body of the request to do a moderation.
-func getModerationBody(r *http.Request) (ModerationRequest, error) {
-	moderation := ModerationRequest{}
+func getModerationBody(r *http.Request) (openai.ModerationRequest, error) {
+	moderation := openai.ModerationRequest{}
 	// read the request body
 	reqBody, err := io.ReadAll(r.Body)
 	if err != nil {
-		return ModerationRequest{}, err
+		return openai.ModerationRequest{}, err
 	}
 	err = json.Unmarshal(reqBody, &moderation)
 	if err != nil {
-		return ModerationRequest{}, err
+		return openai.ModerationRequest{}, err
 	}
 	return moderation, nil
 }
